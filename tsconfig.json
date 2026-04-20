@@ -16,6 +16,7 @@
 		"strictNullChecks": true,
 		"strictBindCallApply": true,
 		"allowSyntheticDefaultImports": true,
+		"ignoreDeprecations": "6.0",
 		"useUnknownInCatchVariables": true,
 		"lib": [
 			"DOM",

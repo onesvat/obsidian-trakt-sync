@@ -1,6 +1,7 @@
 import esbuild from "esbuild";
 import process from "process";
 import { builtinModules } from 'node:module';
+import { existsSync, readFileSync } from "node:fs";
 
 const banner =
 `/*
@@ -11,12 +12,46 @@ if you want to view the source, please visit the github repository of this plugi
 
 const prod = (process.argv[2] === "production");
 
+function loadDotEnv(path) {
+	if (!existsSync(path)) {
+		return {};
+	}
+
+	const content = readFileSync(path, "utf8");
+	const lines = content.split(/\r?\n/);
+	const env = {};
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (!trimmed || trimmed.startsWith("#")) {
+			continue;
+		}
+
+		const separator = trimmed.indexOf("=");
+		if (separator <= 0) {
+			continue;
+		}
+
+		const key = trimmed.slice(0, separator).trim();
+		const value = trimmed.slice(separator + 1).trim();
+		env[key] = value;
+	}
+
+	return env;
+}
+
+const env = loadDotEnv(".env");
+
 const context = await esbuild.context({
 	banner: {
 		js: banner,
 	},
 	entryPoints: ["src/main.ts"],
 	bundle: true,
+	define: {
+		__TRAKT_CLIENT_ID__: JSON.stringify(env.TRAKT_CLIENT_ID ?? ""),
+		__TRAKT_CLIENT_SECRET__: JSON.stringify(env.TRAKT_CLIENT_SECRET ?? ""),
+	},
 	external: [
 		"obsidian",
 		"electron",

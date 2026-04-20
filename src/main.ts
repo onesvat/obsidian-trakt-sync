@@ -1,99 +1,198 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { App, Modal, Notice, Plugin } from "obsidian";
+import { getBuildEnvConfig } from "./env";
+import { TraktSyncSettings, TraktSyncSettingTab } from "./settings";
+import { syncTraktData } from "./sync";
+import { StoredTraktAuth, TraktClient } from "./traktClient";
 
-// Remember to rename these classes and interfaces!
+const DEVICE_AUTH_TIMEOUT_SECONDS = 15 * 60;
 
 export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+	settings: TraktSyncSettings;
+	private readonly buildEnv = getBuildEnvConfig();
+	private traktClient: TraktClient;
 
-	async onload() {
+	async onload(): Promise<void> {
 		await this.loadSettings();
+		this.initializeBuildEnvDefaults();
+		this.traktClient = this.createTraktClient();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
+		this.addRibbonIcon("refresh-cw", "Sync Trakt activity", async () => {
+			await this.runSync(true);
 		});
 
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
 		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
+			id: "trakt-authenticate",
+			name: "Trakt: authenticate",
+			callback: async () => {
+				await this.authenticateWithTrakt();
+			},
+		});
+
+		this.addCommand({
+			id: "trakt-sync-now",
+			name: "Trakt: sync now",
+			callback: async () => {
+				await this.runSync(true);
+			},
+		});
+
+		this.addCommand({
+			id: "trakt-clear-auth",
+			name: "Trakt: clear authentication",
+			callback: async () => {
+				await this.clearAuth();
+			},
+		});
+
+		this.addSettingTab(new TraktSyncSettingTab(this.app, this));
+
+		if (this.settings.autoSyncOnStartup && this.hasAuthToken()) {
+			void this.runSync(false);
+		}
+	}
+
+	onunload(): void {
+		// no-op
+	}
+
+	async authenticateWithTrakt(): Promise<void> {
+		try {
+			const deviceCode = await this.traktClient.startDeviceAuthorization();
+			const modal = new DeviceCodeModal(this.app, deviceCode.user_code, deviceCode.verification_url);
+			modal.open();
+
+			new Notice(`Open ${deviceCode.verification_url} and enter code ${deviceCode.user_code}.`);
+			const token = await this.traktClient.pollForDeviceToken(
+				deviceCode.device_code,
+				deviceCode.interval,
+				DEVICE_AUTH_TIMEOUT_SECONDS,
+			);
+
+			await this.setAuth(token);
+			modal.close();
+			new Notice("Trakt authentication succeeded.");
+		} catch (error) {
+			new Notice(`Trakt authentication failed: ${extractErrorMessage(error)}`);
+		}
+	}
+
+	async runSync(showNotice: boolean): Promise<void> {
+		if (!this.hasAuthToken()) {
+			if (showNotice) {
+				new Notice("Trakt is not authenticated. Run 'Trakt: authenticate' first.");
 			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
+			return;
+		}
 
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
+		try {
+			const summary = await syncTraktData(this.app, this.settings, this.traktClient);
+			this.settings.lastSyncAt = new Date().toISOString();
+			await this.saveSettings();
+
+			if (showNotice) {
+				new Notice(
+					`Trakt sync complete. Daily note: ${summary.dailyNoteUpdated ? "updated" : "skipped"}. Created pages - movies: ${summary.createdMoviePages}, shows: ${summary.createdShowPages}, episodes: ${summary.createdEpisodePages}.`,
+				);
+			}
+		} catch (error) {
+			if (showNotice) {
+				new Notice(`Trakt sync failed: ${extractErrorMessage(error)}`);
+			}
+		}
+	}
+
+	hasAuthToken(): boolean {
+		return Boolean(this.settings.accessToken && this.settings.refreshToken);
+	}
+
+	async clearAuth(): Promise<void> {
+		this.settings.accessToken = "";
+		this.settings.refreshToken = "";
+		this.settings.expiresAt = 0;
+		this.settings.scope = "";
+		this.settings.tokenType = "";
+		await this.saveSettings();
+		new Notice("Trakt authentication has been cleared.");
+	}
+
+	async setAuth(auth: StoredTraktAuth): Promise<void> {
+		this.settings.accessToken = auth.accessToken;
+		this.settings.refreshToken = auth.refreshToken;
+		this.settings.expiresAt = auth.expiresAt;
+		this.settings.tokenType = auth.tokenType;
+		this.settings.scope = auth.scope;
+		await this.saveSettings();
+	}
+
+	private createTraktClient(): TraktClient {
+		return new TraktClient({
+			getClientId: () => this.settings.clientId,
+			getClientSecret: () => this.settings.clientSecret,
+			getAuth: () => {
+				if (!this.hasAuthToken()) {
+					return null;
 				}
-				return false;
-			}
+				return {
+					accessToken: this.settings.accessToken,
+					refreshToken: this.settings.refreshToken,
+					expiresAt: this.settings.expiresAt,
+					tokenType: this.settings.tokenType,
+					scope: this.settings.scope,
+				};
+			},
+			saveAuth: async (auth) => {
+				await this.setAuth(auth);
+			},
 		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
 	}
 
-	onunload() {
+	private initializeBuildEnvDefaults(): void {
+		if (!this.settings.clientId && this.buildEnv.clientId) {
+			this.settings.clientId = this.buildEnv.clientId;
+		}
+
+		if (!this.settings.clientSecret && this.buildEnv.clientSecret) {
+			this.settings.clientSecret = this.buildEnv.clientSecret;
+		}
 	}
 
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+	async loadSettings(): Promise<void> {
+		const stored = (await this.loadData()) as Partial<TraktSyncSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, stored ?? {});
 	}
 
-	async saveSettings() {
+	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
 	}
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
+class DeviceCodeModal extends Modal {
+	private readonly userCode: string;
+	private readonly verificationUrl: string;
+
+	constructor(app: App, userCode: string, verificationUrl: string) {
 		super(app);
+		this.userCode = userCode;
+		this.verificationUrl = verificationUrl;
 	}
 
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
+	onOpen(): void {
+		const { contentEl } = this;
 		contentEl.empty();
+		contentEl.createEl("h3", { text: "Authenticate with Trakt" });
+		contentEl.createEl("p", { text: `1. Open ${this.verificationUrl}` });
+		contentEl.createEl("p", { text: `2. Enter code: ${this.userCode}` });
+		contentEl.createEl("p", { text: "3. Keep this modal open until authentication finishes." });
 	}
+
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
+function extractErrorMessage(error: unknown): string {
+	if (error instanceof Error) {
+		return error.message;
+	}
+	return "Unknown error";
 }

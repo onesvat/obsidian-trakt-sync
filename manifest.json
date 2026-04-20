@@ -1,11 +1,10 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
+	"id": "obsidian-trakt-sync",
+	"name": "Trakt Sync",
 	"version": "1.0.0",
 	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"description": "Authenticate with trakt.tv, sync recent activity to daily notes, and generate movie/show/episode pages from templates.",
+	"author": "onesvat",
+	"authorUrl": "https://github.com/onesvat",
 	"isDesktopOnly": false
 }
