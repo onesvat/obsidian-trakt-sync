@@ -2,6 +2,7 @@ import * as assert from "node:assert/strict";
 import { TFile } from "obsidian";
 import { DEFAULT_SETTINGS, TraktSyncSettings } from "../src/settings";
 import { syncTraktData } from "../src/sync";
+import { buildActivityValues, buildHistoryTemplateValues, formatEpisodeCode, getTemplateConfig } from "../src/syncPure";
 import { TraktClient, TraktHistoryItem, TraktLastActivities } from "../src/traktClient";
 
 class FakeClient {
@@ -62,6 +63,62 @@ class FakeVault {
 }
 
 export async function runSyncTests(): Promise<void> {
+	const now = new Date("2026-04-20T12:00:00.000Z");
+	const activityValues = buildActivityValues({}, now);
+	assert.equal(activityValues.synced_at, "2026-04-20T12:00:00.000Z");
+	assert.equal(activityValues.synced_date, "2026-04-20");
+	assert.equal(activityValues.movies_watched_at, "");
+
+	const movieValues = buildHistoryTemplateValues(
+		{
+			id: 1,
+			type: "movie",
+			watched_at: "2026-04-20T10:00:00.000Z",
+			movie: { title: "Dune", year: 2021, ids: { trakt: 42, imdb: "tt1160419", slug: "dune-2021" } },
+		},
+		now,
+	);
+	assert.ok(movieValues !== null);
+	assert.equal(movieValues.movie_title, "Dune");
+	assert.equal(movieValues.icon, "🎬");
+	assert.equal(movieValues.title, "Dune");
+
+	const episodeValues = buildHistoryTemplateValues(
+		{
+			id: 2,
+			type: "episode",
+			watched_at: "2026-04-20T10:00:00.000Z",
+			show: { title: "Breaking Bad", year: 2008, ids: { slug: "breaking-bad" } },
+			episode: { season: 1, number: 1, title: "Pilot", ids: { trakt: 99 } },
+		},
+		now,
+	);
+	assert.ok(episodeValues !== null);
+	assert.equal(episodeValues.episode_code, "S01E01");
+	assert.equal(episodeValues.title, "Breaking Bad - S01E01");
+	assert.equal(formatEpisodeCode(10, 10), "S10E10");
+
+	type TemplateSettings = Pick<
+		TraktSyncSettings,
+		| "movieFileNameTemplate"
+		| "movieContentTemplate"
+		| "showFileNameTemplate"
+		| "showContentTemplate"
+		| "episodeFileNameTemplate"
+		| "episodeContentTemplate"
+	>;
+	const templateSettings: TemplateSettings = {
+		movieFileNameTemplate: "movie-fn",
+		movieContentTemplate: "movie-ct",
+		showFileNameTemplate: "show-fn",
+		showContentTemplate: "show-ct",
+		episodeFileNameTemplate: "episode-fn",
+		episodeContentTemplate: "episode-ct",
+	};
+	assert.deepEqual(getTemplateConfig(templateSettings, "movie"), { fileNameTemplate: "movie-fn", contentTemplate: "movie-ct" });
+	assert.deepEqual(getTemplateConfig(templateSettings, "show"), { fileNameTemplate: "show-fn", contentTemplate: "show-ct" });
+	assert.deepEqual(getTemplateConfig(templateSettings, "episode"), { fileNameTemplate: "episode-fn", contentTemplate: "episode-ct" });
+
 	const history: TraktHistoryItem[] = [
 		{
 			id: 10,

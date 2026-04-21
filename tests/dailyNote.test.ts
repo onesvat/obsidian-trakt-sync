@@ -2,19 +2,25 @@ import * as assert from "node:assert/strict";
 import { insertEntryUnderHeading } from "../src/dailyNote";
 
 export function runDailyNoteTests(): void {
-	const existingHeadingContent = "# Day\n\n## Trakt\nold line\n";
-	const existingHeadingOutput = insertEntryUnderHeading(existingHeadingContent, "Trakt", "new line");
-	assert.ok(existingHeadingOutput.includes("## Trakt\nnew line\nold line"));
+	const content = "# Day\n\n## Trakt\nold line\n";
+	const result = insertEntryUnderHeading(content, "Trakt", "new line");
+	assert.ok(result.includes("## Trakt\nnew line\nold line"));
 
-	const missingHeadingContent = "# Day\n";
-	const missingHeadingOutput = insertEntryUnderHeading(missingHeadingContent, "Trakt", "entry");
-	assert.ok(missingHeadingOutput.includes("## Trakt\nentry"));
+	const missingHeading = insertEntryUnderHeading("# Day\n", "Trakt", "entry");
+	assert.ok(missingHeading.includes("## Trakt\nentry"));
 
-	const emptyHeadingContent = "# Day\n";
-	const emptyHeadingOutput = insertEntryUnderHeading(emptyHeadingContent, "", "entry");
-	assert.equal(emptyHeadingOutput.trimEnd(), "# Day\n\nentry");
+	const emptyHeading = insertEntryUnderHeading("# Day\n", "", "entry");
+	assert.equal(emptyHeading.trimEnd(), "# Day\n\nentry");
 
-	const emptyEntryContent = "# Day\n";
-	const emptyEntryOutput = insertEntryUnderHeading(emptyEntryContent, "Trakt", "   ");
-	assert.equal(emptyEntryOutput, emptyEntryContent);
+	const whitespaceEntry = insertEntryUnderHeading("# Day\n", "Trakt", "   ");
+	assert.equal(whitespaceEntry, "# Day\n");
+
+	const emptyContent = insertEntryUnderHeading("", "Trakt", "entry");
+	assert.ok(emptyContent.includes("## Trakt\nentry"));
+
+	const repeatedHeading = insertEntryUnderHeading("## Trakt\nfirst\n\n## Trakt\nsecond\n", "Trakt", "new");
+	assert.ok(repeatedHeading.startsWith("## Trakt\nnew\nfirst"));
+
+	const endHeading = insertEntryUnderHeading("# Day\n## Trakt", "Trakt", "entry");
+	assert.ok(endHeading.includes("## Trakt\nentry"));
 }

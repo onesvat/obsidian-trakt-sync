@@ -7,6 +7,7 @@ async function run(name: string, test: () => void | Promise<void>): Promise<void
 	try {
 		await test();
 		console.log(`PASS ${name}`);
+		return;
 	} catch (error) {
 		console.error(`FAIL ${name}`);
 		throw error;

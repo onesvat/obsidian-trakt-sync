@@ -10,11 +10,14 @@
 		"declaration": false,
 		"sourceMap": false,
 		"inlineSourceMap": false,
-		"inlineSources": false
+		"inlineSources": false,
+		"esModuleInterop": true
 	},
 	"include": [
 		"tests/**/*.ts",
 		"src/template.ts",
-		"src/dailyNote.ts"
+		"src/dailyNote.ts",
+		"src/dailyNotePath.ts",
+		"src/syncPure.ts"
 	]
 }
