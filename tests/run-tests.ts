@@ -1,9 +1,11 @@
+import { runDailyNotePathTests } from "./dailyNotePath.test";
 import { runDailyNoteTests } from "./dailyNote.test";
+import { runSyncTests } from "./sync.test";
 import { runTemplateTests } from "./template.test";
 
-function run(name: string, fn: () => void): void {
+async function run(name: string, test: () => void | Promise<void>): Promise<void> {
 	try {
-		fn();
+		await test();
 		console.log(`PASS ${name}`);
 	} catch (error) {
 		console.error(`FAIL ${name}`);
@@ -11,7 +13,11 @@ function run(name: string, fn: () => void): void {
 	}
 }
 
-run("template", runTemplateTests);
-run("daily-note", runDailyNoteTests);
+async function main(): Promise<void> {
+	await run("template", runTemplateTests);
+	await run("daily-note", runDailyNoteTests);
+	await run("daily-note-path", runDailyNotePathTests);
+	await run("sync", runSyncTests);
+}
 
-console.log("All tests passed.");
+void main();

@@ -1,8 +1,16 @@
-/*
+.trakt-sync-settings .trakt-sync-template-setting {
+	align-items: flex-start;
+}
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+.trakt-sync-settings .trakt-sync-template-setting .setting-item-control {
+	flex: 1 1 100%;
+}
 
-If your plugin does not need CSS, delete this file.
-
-*/
+.trakt-sync-settings .trakt-sync-template-input {
+	width: 100%;
+	min-height: 12rem;
+	resize: vertical;
+	font-family: var(--font-monospace);
+	line-height: 1.5;
+	white-space: pre;
+}

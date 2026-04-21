@@ -244,7 +244,7 @@ export class TraktClient {
 
 	private assertClientCredentials(): void {
 		if (!this.getClientId() || !this.getClientSecret()) {
-			throw new Error("Trakt client ID and client secret are required. Add them in plugin settings or .env.");
+			throw new Error("Trakt client configuration is missing from the plugin bundle.");
 		}
 	}
 

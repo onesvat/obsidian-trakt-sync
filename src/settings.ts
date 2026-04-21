@@ -1,10 +1,14 @@
-import { App, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting, TextAreaComponent } from "obsidian";
+import { getAutoDetectedDailyNotePathTemplate } from "./dailyNotePath";
 import MyPlugin from "./main";
 
-export interface TraktSyncSettings {
-	clientId: string;
-	clientSecret: string;
+const LEGACY_DEFAULT_DAILY_NOTE_PATH_TEMPLATE = "Daily/{{date:YYYY-MM-DD}}.md";
+const LEGACY_DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE =
+	"- Synced {{synced_at}}\n  - Movies watched at: {{movies_watched_at}}\n  - Episodes watched at: {{episodes_watched_at}}\n  - Shows hidden at: {{shows_hidden_at}}";
+const DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE = "{{icon}} - {{title}} watched";
+const MAX_SYNCED_HISTORY_IDS = 500;
 
+export interface TraktSyncSettings {
 	accessToken: string;
 	refreshToken: string;
 	expiresAt: number;
@@ -15,9 +19,11 @@ export interface TraktSyncSettings {
 	historyLimit: number;
 
 	dailyNoteSyncEnabled: boolean;
-	dailyNotePathTemplate: string;
+	autoDetectDailyNotePath: boolean;
+	dailyNotePathOverride: string;
 	dailyNoteHeading: string;
 	dailyNoteEntryTemplate: string;
+	dailyNoteSyncedHistoryIds: number[];
 
 	notesFolder: string;
 	overwriteExistingPages: boolean;
@@ -36,9 +42,6 @@ export interface TraktSyncSettings {
 }
 
 export const DEFAULT_SETTINGS: TraktSyncSettings = {
-	clientId: "",
-	clientSecret: "",
-
 	accessToken: "",
 	refreshToken: "",
 	expiresAt: 0,
@@ -49,10 +52,11 @@ export const DEFAULT_SETTINGS: TraktSyncSettings = {
 	historyLimit: 25,
 
 	dailyNoteSyncEnabled: true,
-	dailyNotePathTemplate: "Daily/{{date:YYYY-MM-DD}}.md",
+	autoDetectDailyNotePath: true,
+	dailyNotePathOverride: "",
 	dailyNoteHeading: "Trakt",
-	dailyNoteEntryTemplate:
-		"- Synced {{synced_at}}\n  - Movies watched at: {{movies_watched_at}}\n  - Episodes watched at: {{episodes_watched_at}}\n  - Shows hidden at: {{shows_hidden_at}}",
+	dailyNoteEntryTemplate: DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE,
+	dailyNoteSyncedHistoryIds: [],
 
 	notesFolder: "Trakt",
 	overwriteExistingPages: false,
@@ -73,6 +77,40 @@ export const DEFAULT_SETTINGS: TraktSyncSettings = {
 	lastSyncAt: "",
 };
 
+interface LegacyTraktSyncSettings extends Partial<TraktSyncSettings> {
+	clientId?: string;
+	clientSecret?: string;
+	dailyNotePathTemplate?: string;
+}
+
+export function normalizeLoadedSettings(stored: LegacyTraktSyncSettings | null | undefined): TraktSyncSettings {
+	const settings = Object.assign({}, DEFAULT_SETTINGS, stored ?? {}) as TraktSyncSettings;
+	const legacyPathTemplate = typeof stored?.dailyNotePathTemplate === "string" ? stored.dailyNotePathTemplate.trim() : "";
+
+	if (stored && !("autoDetectDailyNotePath" in stored) && !("dailyNotePathOverride" in stored)) {
+		settings.autoDetectDailyNotePath = legacyPathTemplate === "" || legacyPathTemplate === LEGACY_DEFAULT_DAILY_NOTE_PATH_TEMPLATE;
+		settings.dailyNotePathOverride = settings.autoDetectDailyNotePath ? "" : legacyPathTemplate;
+	}
+
+	if (stored && stored.dailyNoteEntryTemplate === LEGACY_DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE) {
+		settings.dailyNoteEntryTemplate = DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE;
+	}
+
+	if (!Array.isArray(settings.dailyNoteSyncedHistoryIds)) {
+		settings.dailyNoteSyncedHistoryIds = [];
+	}
+
+	settings.dailyNoteSyncedHistoryIds = settings.dailyNoteSyncedHistoryIds
+		.filter((value): value is number => Number.isInteger(value) && value > 0)
+		.slice(0, MAX_SYNCED_HISTORY_IDS);
+
+	return settings;
+}
+
+export function limitSyncedHistoryIds(ids: number[]): number[] {
+	return ids.filter((value, index) => Number.isInteger(value) && value > 0 && ids.indexOf(value) === index).slice(0, MAX_SYNCED_HISTORY_IDS);
+}
+
 export class TraktSyncSettingTab extends PluginSettingTab {
 	plugin: MyPlugin;
 
@@ -84,34 +122,9 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+		containerEl.addClass("trakt-sync-settings");
 
 		containerEl.createEl("h2", { text: "Trakt authentication" });
-
-		new Setting(containerEl)
-			.setName("Trakt client ID")
-			.setDesc("Can be left empty if provided in .env as TRAKT_CLIENT_ID.")
-			.addText((text) =>
-				text
-					.setPlaceholder("Client ID")
-					.setValue(this.plugin.settings.clientId)
-					.onChange(async (value) => {
-						this.plugin.settings.clientId = value.trim();
-						await this.plugin.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName("Trakt client secret")
-			.setDesc("Can be left empty if provided in .env as TRAKT_CLIENT_SECRET.")
-			.addText((text) =>
-				text
-					.setPlaceholder("Client secret")
-					.setValue(this.plugin.settings.clientSecret)
-					.onChange(async (value) => {
-						this.plugin.settings.clientSecret = value.trim();
-						await this.plugin.saveSettings();
-					}),
-			);
 
 		new Setting(containerEl)
 			.setName("Authentication actions")
@@ -168,7 +181,7 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Enable daily note sync")
-			.setDesc("Append latest Trakt activity summary to your daily note.")
+			.setDesc("Append watched items to the watched day note when that note already exists.")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.dailyNoteSyncEnabled).onChange(async (value) => {
 					this.plugin.settings.dailyNoteSyncEnabled = value;
@@ -176,16 +189,27 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		const autoDetectedTemplate = getAutoDetectedDailyNotePathTemplate(this.app);
 		new Setting(containerEl)
-			.setName("Daily note path template")
-			.setDesc("Example: Daily/{{date:YYYY-MM-DD}}.md")
+			.setName("Detect daily note path automatically")
+			.setDesc(autoDetectedTemplate ? `Detected: ${autoDetectedTemplate}` : "No daily note plugin settings detected. Fallback will be used unless you set an override.")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.autoDetectDailyNotePath).onChange(async (value) => {
+					this.plugin.settings.autoDetectDailyNotePath = value;
+					await this.plugin.saveSettings();
+					this.display();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName("Daily note path override")
+			.setDesc("Used only when automatic detection is disabled. Example: Daily/{{date:YYYY-MM-DD}}.md")
+			.setDisabled(this.plugin.settings.autoDetectDailyNotePath)
 			.addText((text) =>
-				text
-					.setValue(this.plugin.settings.dailyNotePathTemplate)
-					.onChange(async (value) => {
-						this.plugin.settings.dailyNotePathTemplate = value;
-						await this.plugin.saveSettings();
-					}),
+				text.setValue(this.plugin.settings.dailyNotePathOverride).onChange(async (value) => {
+					this.plugin.settings.dailyNotePathOverride = value.trim();
+					await this.plugin.saveSettings();
+				}),
 			);
 
 		new Setting(containerEl)
@@ -198,19 +222,18 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 				}),
 			);
 
-		new Setting(containerEl)
-			.setName("Daily note entry template")
-			.setDesc("Supports tokens like {{synced_at}} and {{movies_watched_at}}.")
-			.addTextArea((text) =>
-				text
-					.setValue(this.plugin.settings.dailyNoteEntryTemplate)
-					.onChange(async (value) => {
-						this.plugin.settings.dailyNoteEntryTemplate = value;
-						await this.plugin.saveSettings();
-					}),
-			);
+		addTemplateTextArea(
+			containerEl,
+			"Daily note entry template",
+			"Supports tokens like {{icon}}, {{title}}, {{kind}}, {{watched_at}}, {{watched_date}}, {{movie_title}}, {{show_title}}, and {{episode_code}}.",
+			this.plugin.settings.dailyNoteEntryTemplate,
+			async (value) => {
+				this.plugin.settings.dailyNoteEntryTemplate = value;
+				await this.plugin.saveSettings();
+			},
+		);
 
-		containerEl.createEl("h2", { text: "Media pages" });
+		containerEl.createEl("h2", { text: "Output" });
 
 		new Setting(containerEl)
 			.setName("Notes folder")
@@ -232,29 +255,13 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		containerEl.createEl("h2", { text: "Movies" });
+
 		new Setting(containerEl)
 			.setName("Create movie pages")
 			.addToggle((toggle) =>
 				toggle.setValue(this.plugin.settings.createMoviePages).onChange(async (value) => {
 					this.plugin.settings.createMoviePages = value;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName("Create show pages")
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.createShowPages).onChange(async (value) => {
-					this.plugin.settings.createShowPages = value;
-					await this.plugin.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName("Create episode pages")
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.createEpisodePages).onChange(async (value) => {
-					this.plugin.settings.createEpisodePages = value;
 					await this.plugin.saveSettings();
 				}),
 			);
@@ -269,11 +276,18 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		addTemplateTextArea(containerEl, "Movie content template", "Available movie tokens include {{movie_title}}, {{movie_year}}, {{movie_trakt_id}}, {{movie_imdb_id}}, {{watched_at}}, and {{watched_date}}.", this.plugin.settings.movieContentTemplate, async (value) => {
+			this.plugin.settings.movieContentTemplate = value;
+			await this.plugin.saveSettings();
+		});
+
+		containerEl.createEl("h2", { text: "Shows & episodes" });
+
 		new Setting(containerEl)
-			.setName("Movie content template")
-			.addTextArea((text) =>
-				text.setValue(this.plugin.settings.movieContentTemplate).onChange(async (value) => {
-					this.plugin.settings.movieContentTemplate = value;
+			.setName("Create show pages")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.createShowPages).onChange(async (value) => {
+					this.plugin.settings.createShowPages = value;
 					await this.plugin.saveSettings();
 				}),
 			);
@@ -288,11 +302,16 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 				}),
 			);
 
+		addTemplateTextArea(containerEl, "Show content template", "Available show tokens include {{show_title}}, {{show_year}}, {{show_trakt_id}}, {{show_imdb_id}}, {{watched_at}}, and {{watched_date}}.", this.plugin.settings.showContentTemplate, async (value) => {
+			this.plugin.settings.showContentTemplate = value;
+			await this.plugin.saveSettings();
+		});
+
 		new Setting(containerEl)
-			.setName("Show content template")
-			.addTextArea((text) =>
-				text.setValue(this.plugin.settings.showContentTemplate).onChange(async (value) => {
-					this.plugin.settings.showContentTemplate = value;
+			.setName("Create episode pages")
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.createEpisodePages).onChange(async (value) => {
+					this.plugin.settings.createEpisodePages = value;
 					await this.plugin.saveSettings();
 				}),
 			);
@@ -307,13 +326,33 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 				}),
 			);
 
-		new Setting(containerEl)
-			.setName("Episode content template")
-			.addTextArea((text) =>
-				text.setValue(this.plugin.settings.episodeContentTemplate).onChange(async (value) => {
-					this.plugin.settings.episodeContentTemplate = value;
-					await this.plugin.saveSettings();
-				}),
-			);
+		addTemplateTextArea(containerEl, "Episode content template", "Available episode tokens include {{show_title}}, {{episode_title}}, {{episode_code}}, {{episode_season}}, {{episode_number}}, {{episode_trakt_id}}, {{episode_imdb_id}}, {{watched_at}}, and {{watched_date}}.", this.plugin.settings.episodeContentTemplate, async (value) => {
+			this.plugin.settings.episodeContentTemplate = value;
+			await this.plugin.saveSettings();
+		});
 	}
+}
+
+function addTemplateTextArea(
+	containerEl: HTMLElement,
+	name: string,
+	description: string,
+	value: string,
+	onChange: (value: string) => Promise<void>,
+): void {
+	new Setting(containerEl)
+		.setName(name)
+		.setDesc(description)
+		.setClass("trakt-sync-template-setting")
+		.addTextArea((text) => configureTemplateTextArea(text, value, onChange));
+}
+
+function configureTemplateTextArea(
+	text: TextAreaComponent,
+	value: string,
+	onChange: (value: string) => Promise<void>,
+): void {
+	text.setValue(value).onChange(onChange);
+	text.inputEl.rows = 8;
+	text.inputEl.addClass("trakt-sync-template-input");
 }

@@ -31,7 +31,7 @@ export function formatDate(date: Date, format: string): string {
 
 	let output = format;
 	for (const [token, value] of replacements) {
-		output = output.replaceAll(token, value);
+		output = output.replace(new RegExp(token, "g"), value);
 	}
 	return output;
 }

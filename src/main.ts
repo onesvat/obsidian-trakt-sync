@@ -1,19 +1,17 @@
 import { App, Modal, Notice, Plugin } from "obsidian";
-import { getBuildEnvConfig } from "./env";
-import { TraktSyncSettings, TraktSyncSettingTab } from "./settings";
+import { normalizeLoadedSettings, TraktSyncSettings, TraktSyncSettingTab } from "./settings";
 import { syncTraktData } from "./sync";
+import { TRAKT_CLIENT_ID, TRAKT_CLIENT_SECRET } from "./traktConfig";
 import { StoredTraktAuth, TraktClient } from "./traktClient";
 
 const DEVICE_AUTH_TIMEOUT_SECONDS = 15 * 60;
 
 export default class MyPlugin extends Plugin {
 	settings: TraktSyncSettings;
-	private readonly buildEnv = getBuildEnvConfig();
 	private traktClient: TraktClient;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
-		this.initializeBuildEnvDefaults();
 		this.traktClient = this.createTraktClient();
 
 		this.addRibbonIcon("refresh-cw", "Sync Trakt activity", async () => {
@@ -126,8 +124,8 @@ export default class MyPlugin extends Plugin {
 
 	private createTraktClient(): TraktClient {
 		return new TraktClient({
-			getClientId: () => this.settings.clientId,
-			getClientSecret: () => this.settings.clientSecret,
+			getClientId: () => TRAKT_CLIENT_ID,
+			getClientSecret: () => TRAKT_CLIENT_SECRET,
 			getAuth: () => {
 				if (!this.hasAuthToken()) {
 					return null;
@@ -146,19 +144,9 @@ export default class MyPlugin extends Plugin {
 		});
 	}
 
-	private initializeBuildEnvDefaults(): void {
-		if (!this.settings.clientId && this.buildEnv.clientId) {
-			this.settings.clientId = this.buildEnv.clientId;
-		}
-
-		if (!this.settings.clientSecret && this.buildEnv.clientSecret) {
-			this.settings.clientSecret = this.buildEnv.clientSecret;
-		}
-	}
-
 	async loadSettings(): Promise<void> {
-		const stored = (await this.loadData()) as Partial<TraktSyncSettings> | null;
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, stored ?? {});
+		const stored = (await this.loadData()) as Record<string, unknown> | null;
+		this.settings = normalizeLoadedSettings(stored as Partial<TraktSyncSettings> | null);
 	}
 
 	async saveSettings(): Promise<void> {

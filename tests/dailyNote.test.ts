@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+import * as assert from "node:assert/strict";
 import { insertEntryUnderHeading } from "../src/dailyNote";
 
 export function runDailyNoteTests(): void {
