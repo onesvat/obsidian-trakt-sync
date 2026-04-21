@@ -1,9 +1,10 @@
 import { App, normalizePath, TFile } from "obsidian";
 import { insertEntryUnderHeading } from "./dailyNote";
 import { resolveDailyNotePathTemplate } from "./dailyNotePath";
+import { resolveNoteTarget } from "./noteTarget";
 import { limitSyncedHistoryIds, TraktSyncSettings } from "./settings";
-import { getTemplateConfig, buildActivityValues, buildHistoryTemplateValues, SyncRuntimeValues } from "./syncPure";
-import { renderTemplate, sanitizePathSegment } from "./template";
+import { buildActivityValues, buildHistoryTemplateValues, SyncRuntimeValues } from "./syncPure";
+import { renderTemplate } from "./template";
 import { TraktClient, TraktHistoryItem } from "./traktClient";
 
 interface DailyNoteUpdateResult {
@@ -152,8 +153,13 @@ function buildDailyNoteEntry(
 		return null;
 	}
 
+	const noteTarget = resolveNoteTarget(settings, item, now);
+	if (!noteTarget) {
+		return null;
+	}
+
 	const dailyNotePath = normalizePath(renderTemplate(dailyNotePathTemplate, values, watchedAtDate));
-	const dailyEntry = renderTemplate(settings.dailyNoteEntryTemplate, { ...runtimeValues, ...values }, now).trim();
+	const dailyEntry = renderTemplate(settings.dailyNoteEntryTemplate, { ...runtimeValues, ...noteTarget.values }, now).trim();
 	if (!dailyEntry) {
 		return null;
 	}
@@ -166,24 +172,24 @@ function buildDailyNoteEntry(
 }
 
 async function createMediaPage(app: App, settings: TraktSyncSettings, item: TraktHistoryItem, now: Date): Promise<boolean> {
-	const values = buildHistoryTemplateValues(item, now);
-	if (!values) {
+	const noteTarget = resolveNoteTarget(settings, item, now);
+	if (!noteTarget) {
 		return false;
 	}
 
-	const config = getTemplateConfig(settings, item.type);
-	const fileName = sanitizePathSegment(renderTemplate(config.fileNameTemplate, values, now).trim());
-	if (!fileName) {
-		return false;
-	}
-
-	const fullPath = normalizePath(`${settings.notesFolder}/${fileName}.md`);
+	const fullPath = noteTarget.notePath;
 	const existing = app.vault.getAbstractFileByPath(fullPath);
 	if (existing instanceof TFile && !settings.overwriteExistingPages) {
 		return false;
 	}
 
-	const content = renderTemplate(config.contentTemplate, values, now).trimEnd() + "\n";
+	const values = buildHistoryTemplateValues(item, now);
+	if (!values) {
+		return false;
+	}
+
+	const contentTemplate = getContentTemplate(settings, item.type);
+	const content = renderTemplate(contentTemplate, values, now).trimEnd() + "\n";
 	if (existing instanceof TFile) {
 		await app.vault.modify(existing, content);
 		return true;
@@ -192,6 +198,21 @@ async function createMediaPage(app: App, settings: TraktSyncSettings, item: Trak
 	await ensureParentFolders(app, fullPath);
 	await app.vault.create(fullPath, content);
 	return true;
+}
+
+function getContentTemplate(
+	settings: Pick<TraktSyncSettings, "movieContentTemplate" | "showContentTemplate" | "episodeContentTemplate">,
+	type: TraktHistoryItem["type"],
+): string {
+	if (type === "movie") {
+		return settings.movieContentTemplate;
+	}
+
+	if (type === "show") {
+		return settings.showContentTemplate;
+	}
+
+	return settings.episodeContentTemplate;
 }
 
 function parseWatchedAt(watchedAt: string | undefined): Date | null {

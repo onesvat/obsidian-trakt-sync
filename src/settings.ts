@@ -5,7 +5,7 @@ import MyPlugin from "./main";
 const LEGACY_DEFAULT_DAILY_NOTE_PATH_TEMPLATE = "Daily/{{date:YYYY-MM-DD}}.md";
 const LEGACY_DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE =
 	"- Synced {{synced_at}}\n  - Movies watched at: {{movies_watched_at}}\n  - Episodes watched at: {{episodes_watched_at}}\n  - Shows hidden at: {{shows_hidden_at}}";
-const DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE = "{{icon}} - {{title}} watched";
+export const DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE = "- {{icon}} [[{{note_link}}]] watched";
 const MAX_SYNCED_HISTORY_IDS = 500;
 
 export interface TraktSyncSettings {
@@ -93,6 +93,10 @@ export function normalizeLoadedSettings(stored: LegacyTraktSyncSettings | null |
 	}
 
 	if (stored && stored.dailyNoteEntryTemplate === LEGACY_DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE) {
+		settings.dailyNoteEntryTemplate = DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE;
+	}
+
+	if (stored && stored.dailyNoteEntryTemplate === "{{icon}} - {{title}} watched") {
 		settings.dailyNoteEntryTemplate = DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE;
 	}
 
@@ -225,7 +229,7 @@ export class TraktSyncSettingTab extends PluginSettingTab {
 		addTemplateTextArea(
 			containerEl,
 			"Daily note entry template",
-			"Supports tokens like {{icon}}, {{title}}, {{kind}}, {{watched_at}}, {{watched_date}}, {{movie_title}}, {{show_title}}, and {{episode_code}}.",
+			"Supports tokens like {{icon}}, {{title}}, {{note_link}}, {{note_name}}, {{note_path}}, {{kind}}, {{watched_at}}, {{watched_date}}, {{movie_title}}, {{show_title}}, and {{episode_code}}. Default: - {{icon}} [[{{note_link}}]] watched",
 			this.plugin.settings.dailyNoteEntryTemplate,
 			async (value) => {
 				this.plugin.settings.dailyNoteEntryTemplate = value;

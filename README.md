@@ -62,6 +62,9 @@ You can disable auto-detection in plugin settings and provide a manual path over
 ### Daily note entry template
 - `{{icon}}`
 - `{{title}}`
+- `{{note_link}}`
+- `{{note_name}}`
+- `{{note_path}}`
 - `{{kind}}`
 - `{{watched_at}}`
 - `{{watched_date}}`
@@ -74,7 +77,7 @@ You can disable auto-detection in plugin settings and provide a manual path over
 Default template:
 
 ```text
-{{icon}} - {{title}} watched
+- {{icon}} [[{{note_link}}]] watched
 ```
 
 ### Movie templates

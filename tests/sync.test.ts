@@ -1,6 +1,7 @@
 import * as assert from "node:assert/strict";
 import { TFile } from "obsidian";
-import { DEFAULT_SETTINGS, TraktSyncSettings } from "../src/settings";
+import { resolveNoteTarget } from "../src/noteTarget";
+import { DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE, DEFAULT_SETTINGS, TraktSyncSettings } from "../src/settings";
 import { syncTraktData } from "../src/sync";
 import { buildActivityValues, buildHistoryTemplateValues, formatEpisodeCode, getTemplateConfig } from "../src/syncPure";
 import { TraktClient, TraktHistoryItem, TraktLastActivities } from "../src/traktClient";
@@ -82,6 +83,19 @@ export async function runSyncTests(): Promise<void> {
 	assert.equal(movieValues.movie_title, "Dune");
 	assert.equal(movieValues.icon, "🎬");
 	assert.equal(movieValues.title, "Dune");
+	assert.equal(resolveNoteTarget(DEFAULT_SETTINGS, {
+		id: 1,
+		type: "movie",
+		watched_at: "2026-04-20T10:00:00.000Z",
+		movie: { title: "Dune", year: 2021, ids: { trakt: 42, imdb: "tt1160419", slug: "dune-2021" } },
+	}, now)?.noteLink, "Trakt/Dune (2021)");
+
+	assert.equal(resolveNoteTarget(DEFAULT_SETTINGS, {
+		id: 3,
+		type: "show",
+		watched_at: "2026-04-20T10:00:00.000Z",
+		show: { title: "Severance", year: 2022, ids: { slug: "severance", trakt: 12 } },
+	}, now)?.noteLink, "Trakt/Severance (2022)");
 
 	const episodeValues = buildHistoryTemplateValues(
 		{
@@ -97,6 +111,13 @@ export async function runSyncTests(): Promise<void> {
 	assert.equal(episodeValues.episode_code, "S01E01");
 	assert.equal(episodeValues.title, "Breaking Bad - S01E01");
 	assert.equal(formatEpisodeCode(10, 10), "S10E10");
+	assert.equal(resolveNoteTarget(DEFAULT_SETTINGS, {
+		id: 2,
+		type: "episode",
+		watched_at: "2026-04-20T10:00:00.000Z",
+		show: { title: "Severance", year: 2022, ids: { slug: "severance" } },
+		episode: { season: 1, number: 1, title: "Pilot", ids: { trakt: 99 } },
+	}, now)?.noteLink, "Trakt/Severance - S01E01");
 
 	type TemplateSettings = Pick<
 		TraktSyncSettings,
@@ -149,13 +170,18 @@ export async function runSyncTests(): Promise<void> {
 	const settings: TraktSyncSettings = {
 		...DEFAULT_SETTINGS,
 		dailyNoteSyncedHistoryIds: [99],
+		createMoviePages: false,
+		createEpisodePages: false,
 	};
 
 	const summary = await syncTraktData(app, settings, client);
 	assert.equal(summary.dailyNoteUpdated, true);
-	assert.match(vault.readPath("Daily/2026-04-21.md") ?? "", /📺 - Severance - S01E01 watched\nold line/);
-	assert.match(vault.readPath("Daily/2026-04-20.md") ?? "", /## Trakt\n🎬 - Dune watched/);
+	assert.equal(settings.dailyNoteEntryTemplate, DEFAULT_DAILY_NOTE_ENTRY_TEMPLATE);
+	assert.match(vault.readPath("Daily/2026-04-21.md") ?? "", /- 📺 \[\[Trakt\/Severance - S01E01\]\] watched\nold line/);
+	assert.match(vault.readPath("Daily/2026-04-20.md") ?? "", /## Trakt\n- 🎬 \[\[Trakt\/Dune \(2021\)\]\] watched/);
 	assert.deepEqual(settings.dailyNoteSyncedHistoryIds, [99, 10, 9]);
+	assert.equal(vault.readPath("Trakt/Dune (2021).md"), undefined);
+	assert.equal(vault.readPath("Trakt/Severance - S01E01.md"), undefined);
 
 	const missingNoteVault = new FakeVault({});
 	const missingApp = { vault: missingNoteVault } as never;
@@ -178,6 +204,30 @@ export async function runSyncTests(): Promise<void> {
 	assert.equal(duplicateVault.readPath("Daily/2026-04-21.md"), "# 2026-04-21\n\n## Trakt\nold line\n");
 	assert.equal(duplicateVault.readPath("Daily/2026-04-20.md"), "# 2026-04-20\n");
 	assert.deepEqual(duplicateSettings.dailyNoteSyncedHistoryIds, [10, 9]);
+
+	const invalidTargetHistory: TraktHistoryItem[] = [
+		{
+			id: 20,
+			type: "movie",
+			watched_at: "2026-04-20T20:00:00.000Z",
+			movie: { title: "Dune", year: 2021, ids: { slug: "dune-2021", trakt: 1 } },
+		},
+	];
+	const invalidTargetVault = new FakeVault({
+		"Daily/2026-04-20.md": "# 2026-04-20\n",
+	});
+	const invalidTargetSettings: TraktSyncSettings = {
+		...DEFAULT_SETTINGS,
+		movieFileNameTemplate: "   ",
+	};
+	const invalidSummary = await syncTraktData(
+		{ vault: invalidTargetVault } as never,
+		invalidTargetSettings,
+		new FakeClient({}, invalidTargetHistory) as unknown as TraktClient,
+	);
+	assert.equal(invalidSummary.dailyNoteUpdated, false);
+	assert.equal(invalidTargetVault.readPath("Daily/2026-04-20.md"), "# 2026-04-20\n");
+	assert.deepEqual(invalidTargetSettings.dailyNoteSyncedHistoryIds, []);
 }
 
 function createTestFile(path: string): TFile {
