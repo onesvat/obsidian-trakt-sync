@@ -1,6 +1,6 @@
 import { App, Modal, Notice, Plugin } from "obsidian";
 import { getBuildEnvConfig } from "./env";
-import { TraktSyncSettings, TraktSyncSettingTab } from "./settings";
+import { TraktSyncSettings, TraktSyncSettingTab, DEFAULT_SETTINGS } from "./settings";
 import { syncTraktData } from "./sync";
 import { StoredTraktAuth, TraktClient } from "./traktClient";
 
