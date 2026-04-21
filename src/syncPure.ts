@@ -21,7 +21,17 @@ export function buildActivityValues(activities: TraktLastActivities, now: Date):
 	};
 }
 
-export function getTemplateConfig(settings: TraktSyncSettings, type: TraktHistoryItem["type"]): { fileNameTemplate: string; contentTemplate: string } {
+type TemplateConfig = Pick<
+	TraktSyncSettings,
+	| "movieFileNameTemplate"
+	| "movieContentTemplate"
+	| "showFileNameTemplate"
+	| "showContentTemplate"
+	| "episodeFileNameTemplate"
+	| "episodeContentTemplate"
+>;
+
+export function getTemplateConfig(settings: TemplateConfig, type: TraktHistoryItem["type"]): { fileNameTemplate: string; contentTemplate: string } {
 	if (type === "movie") {
 		return {
 			fileNameTemplate: settings.movieFileNameTemplate,
@@ -85,7 +95,7 @@ export function buildHistoryTemplateValues(item: TraktHistoryItem, now: Date): R
 		const episodeTitle = item.episode.title ?? "";
 		const season = String(item.episode.season);
 		const episodeNumber = String(item.episode.number);
-		const episodeCode = `S${season.padStart(2, "0")}E${episodeNumber.padStart(2, "0")}`;
+		const episodeCode = formatEpisodeCode(item.episode.season, item.episode.number);
 		return {
 			kind: "episode",
 			watched_at: watchedAt,
@@ -103,4 +113,8 @@ export function buildHistoryTemplateValues(item: TraktHistoryItem, now: Date): R
 	}
 
 	return null;
+}
+
+export function formatEpisodeCode(season: number, episode: number): string {
+	return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
 }

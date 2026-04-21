@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildActivityValues, buildHistoryTemplateValues, getTemplateConfig } from "../src/syncPure";
+import { buildActivityValues, buildHistoryTemplateValues, formatEpisodeCode, getTemplateConfig } from "../src/syncPure";
 import type { TraktHistoryItem, TraktLastActivities } from "../src/traktClient";
 import type { TraktSyncSettings } from "../src/settings";
 
@@ -187,15 +187,34 @@ describe("buildHistoryTemplateValues — episode", () => {
 	});
 });
 
+describe("formatEpisodeCode", () => {
+	it("zero-pads single-digit season and episode numbers", () => {
+		assert.equal(formatEpisodeCode(1, 1), "S01E01");
+	});
+
+	it("does not pad two-digit numbers", () => {
+		assert.equal(formatEpisodeCode(10, 10), "S10E10");
+	});
+});
+
 describe("getTemplateConfig", () => {
-	const settings = {
+	type TemplateSettings = Pick<
+		TraktSyncSettings,
+		| "movieFileNameTemplate"
+		| "movieContentTemplate"
+		| "showFileNameTemplate"
+		| "showContentTemplate"
+		| "episodeFileNameTemplate"
+		| "episodeContentTemplate"
+	>;
+	const settings: TemplateSettings = {
 		movieFileNameTemplate: "movie-fn",
 		movieContentTemplate: "movie-ct",
 		showFileNameTemplate: "show-fn",
 		showContentTemplate: "show-ct",
 		episodeFileNameTemplate: "episode-fn",
 		episodeContentTemplate: "episode-ct",
-	} as unknown as TraktSyncSettings;
+	};
 
 	it("returns movie templates for type movie", () => {
 		const config = getTemplateConfig(settings, "movie");
